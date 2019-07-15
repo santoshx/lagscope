@@ -14,6 +14,7 @@
 #include <math.h>
 
 // Linux specific header files
+#ifndef _WIN32
 #include <unistd.h>
 #include <pthread.h>
 #include <errno.h>
@@ -27,5 +28,22 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/tcp.h>
+#endif
+
+// Windows specific
+#ifdef _WIN32
+
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <iphlpapi.h>
+#include <stdio.h>
+
+#pragma comment(lib, "Ws2_32.lib")
+
+#endif // _WIN32
 
 #endif // INCLUDES_H
