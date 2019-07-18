@@ -6,6 +6,58 @@
 
 #include "util.h"
 
+#ifdef _WIN32
+int vasprintf(char **strp, const char *format, va_list ap)
+{
+	int len = _vscprintf(format, ap);
+	if (len == -1)
+		return -1;
+	char *str = (char*)malloc((size_t) len + 1);
+	if (!str)
+		return -1;
+	int retval = vsnprintf(str, len + 1, format, ap);
+	if (retval == -1) {
+		free(str);
+		return -1;
+	}
+	*strp = str;
+	return retval;
+}
+
+int asprintf(char **strp, const char *format, ...)
+{
+	va_list ap;
+	va_start(ap, format);
+	int retval = vasprintf(strp, format, ap);
+	va_end(ap);
+	return retval;
+}
+
+char* optarg = NULL;
+int optind = 1;
+
+int getopt(int argc, char *const argv[], const char *optstring)
+{
+	if ((optind >= argc) || (argv[optind][0] != '-') || (argv[optind][0] == 0))
+        	return -1;
+	
+	int opt = argv[optind][1];
+	const char *p = strchr(optstring, opt);
+
+	if (p == NULL)
+		return '?';
+
+	if (p[1] == ':') {
+	        optind++;
+        	if (optind >= argc)
+        		return '?';
+		optarg = argv[optind];
+		optind++;
+	}
+	return opt;
+}
+#endif
+
 void print_flags(struct lagscope_test *test)
 {
 	if (test->server_role)

@@ -6,6 +6,26 @@
 
 #include "main.h"
 
+#ifdef _WIN32
+static int gettimeofday(struct timeval * tp, struct timezone * tzp)
+{
+	static const uint64_t EPOCH = ((uint64_t) 116444736000000000ULL);
+
+	SYSTEMTIME  system_time;
+	FILETIME    file_time;
+	uint64_t    time;
+	
+	GetSystemTime( &system_time );
+	SystemTimeToFileTime( &system_time, &file_time );
+	time =  ((uint64_t)file_time.dwLowDateTime );
+	time += ((uint64_t)file_time.dwHighDateTime) << 32;
+
+	tp->tv_sec  = (long) ((time - EPOCH) / 10000000L);
+	tp->tv_usec = (long) (system_time.wMilliseconds * 1000);
+	return 0;
+}
+#endif
+
 static int n_write_read(int sockfd, char *buffer, int msg_actual_size)
 {
 	int n = 0; //write n bytes to socket
@@ -37,12 +57,21 @@ long run_lagscope_sender(struct lagscope_test_client *client)
 	bool verbose_log = false;
 	struct lagscope_test_runtime *test_runtime;
 	int sockfd = 0; //socket id
-	int sendbuff, recvbuff = 0;   //send buffer size
+	double sendbuff, recvbuff = 0;   //send buffer size
 	char *buffer; //send buffer
 	int msg_actual_size; //the buffer actual size = msg_size * sizeof(char)
 	struct lagscope_test *test = client->test;
 	int n = 0; //write n bytes to socket
 
+#ifdef _WIN32
+	// Initialize Winsock
+	WSADATA wsaData;
+	int iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
+	if (iResult != 0) {
+		PRINT_ERR("WSAStartup failed:");
+		return iResult;
+	}
+#endif
 	struct sockaddr_storage local_addr; //for local address
 	socklen_t local_addr_size; //local address size, for getsockname(), to get local port
 	char *ip_address_str; //used to get remote peer's ip address
@@ -53,14 +82,14 @@ long run_lagscope_sender(struct lagscope_test_client *client)
 	struct timeval now;
 	struct timeval send_time;
 	struct timeval recv_time;
-	double latency = 0;
+	unsigned long latency = 0;
 	int i = 0;
 
 	/* for ping statistics */
 	unsigned long n_pings = 0; //number of pings
-	double max_latency = 0;
-	double min_latency = 60000; //60 seconds
-	double sum_latency = 0;
+	unsigned long max_latency = 0;
+	unsigned long min_latency = 60000; //60 seconds
+	unsigned long sum_latency = 0;
 
 	int latencies_stats_err_check = 0;
 
@@ -70,7 +99,6 @@ long run_lagscope_sender(struct lagscope_test_client *client)
 	ip_address_max_size = (test->domain == AF_INET? INET_ADDRSTRLEN : INET6_ADDRSTRLEN);
 	if ((ip_address_str = (char *)malloc(ip_address_max_size)) == (char *)NULL) {
 		PRINT_ERR("cannot allocate memory for ip address string");
-		freeaddrinfo(serv_info);
 		return 0;
 	}
 
@@ -144,7 +172,7 @@ long run_lagscope_sender(struct lagscope_test_client *client)
 			}
 			freeaddrinfo(serv_info);
 			free(ip_address_str);
-			close(sockfd);
+			CLOSE(sockfd);
 			return 0;
 		}
 		else {
@@ -170,7 +198,7 @@ long run_lagscope_sender(struct lagscope_test_client *client)
 	msg_actual_size = test->msg_size * sizeof(char);
 	if ((buffer = (char *)malloc(msg_actual_size)) == (char *)NULL) {
 		PRINT_ERR("cannot allocate memory for send message");
-		close(sockfd);
+		CLOSE(sockfd);
 		return 0;
 	}
 	memset(buffer, 'A', msg_actual_size);
@@ -198,10 +226,10 @@ long run_lagscope_sender(struct lagscope_test_client *client)
 	while (is_light_turned_on()) {
 		/* Interop with latte.exe:
 		 * latte needs iteration count in data */
-		buffer[3] = (n_pings >> 24);
-		buffer[2] = (n_pings >> 16);
-		buffer[1] = (n_pings >> 8);
-		buffer[0] = (n_pings /*>> 0*/);
+		buffer[3] = (char) (n_pings >> 24);
+		buffer[2] = (char) (n_pings >> 16);
+		buffer[1] = (char) (n_pings >> 8);
+		buffer[0] = (char) (n_pings /*>> 0*/);
 
 		gettimeofday(&now, NULL);
 		send_time = now;
@@ -241,9 +269,12 @@ long run_lagscope_sender(struct lagscope_test_client *client)
 			report_progress(test_runtime);
 
 		if (test->interval !=0)
+#ifndef _WIN32
 			sleep(test->interval); //sleep for ping interval, for example, 1 second
+#else
+			Sleep(test->interval*1000);
+#endif
 	}
-	//sleep(60);
 finished:
 	PRINT_INFO("TEST COMPLETED.");
 
@@ -299,7 +330,7 @@ finished:
 	free(ip_address_str);
 	free(buffer);
 	latencies_stats_cleanup();
-	close(sockfd);
+	CLOSE(sockfd);
 	return n_pings;
 }
 
@@ -314,11 +345,21 @@ int lagscope_server_listen(struct lagscope_test_server *server)
 	bool verbose_log = test->verbose;
 	int opt = 1;
 	int sockfd = 0; //socket file descriptor
-	int sendbuff, recvbuff = 0; //receive buffer size
+	double sendbuff, recvbuff = 0; //receive buffer size
 	char *ip_address_str; //used to get local ip address
 	int ip_address_max_size;  //used to get local ip address
 	char *port_str; //to get remote peer's port number for getaddrinfo()
-	struct addrinfo hints, *serv_info, *p; //to get remote peer's sockaddr for bind()
+	struct addrinfo hints, *serv_info = NULL, *p; //to get remote peer's sockaddr for bind()
+
+#ifdef _WIN32
+	// Initialize Winsock
+	WSADATA wsaData;
+	int iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
+	if (iResult != 0) {
+		PRINT_ERR("WSAStartup failed:");
+		return iResult;
+	}
+#endif
 
 	int i = 0; //just for debug purpose
 
@@ -354,7 +395,7 @@ int lagscope_server_listen(struct lagscope_test_server *server)
 			PRINT_ERR_FREE(log);
 			freeaddrinfo(serv_info);
 			free(ip_address_str);
-			close(sockfd);
+			CLOSE(sockfd);
 			return -1;
 		}
 
@@ -365,7 +406,7 @@ int lagscope_server_listen(struct lagscope_test_server *server)
 			PRINT_ERR_FREE(log);
 			freeaddrinfo(serv_info);
 			free(ip_address_str);
-			close(sockfd);
+			CLOSE(sockfd);
 			return -1;
 		}
 #endif
@@ -376,7 +417,7 @@ int lagscope_server_listen(struct lagscope_test_server *server)
 			PRINT_ERR_FREE(log);
 			freeaddrinfo(serv_info);
 			free(ip_address_str);
-			close(sockfd);
+			CLOSE(sockfd);
 			return -1;
 		}
 		recvbuff = test->recv_buf_size;
@@ -385,7 +426,7 @@ int lagscope_server_listen(struct lagscope_test_server *server)
 			PRINT_ERR_FREE(log);
 			freeaddrinfo(serv_info);
 			free(ip_address_str);
-			close(sockfd);
+			CLOSE(sockfd);
 			return -1;
 		}
 /*		if (set_socket_non_blocking(sockfd) == -1) {
@@ -393,7 +434,7 @@ int lagscope_server_listen(struct lagscope_test_server *server)
 			PRINT_ERR_FREE(log);
 			freeaddrinfo(serv_info);
 			free(ip_address_str);
-			close(sockfd);
+			CLOSE(sockfd);
 			return -1;
 		}
 */
@@ -415,7 +456,7 @@ int lagscope_server_listen(struct lagscope_test_server *server)
 	if (p == NULL) {
 		ASPRINTF(&log, "cannot bind the socket on address: %s", test->bind_address);
 		PRINT_ERR_FREE(log);
-		close(sockfd);
+		CLOSE(sockfd);
 		return -1;
 	}
 
@@ -423,7 +464,7 @@ int lagscope_server_listen(struct lagscope_test_server *server)
 	if (listen(server->listener, MAX_CONNECTIONS_PER_THREAD) < 0) {
 		ASPRINTF(&log, "failed to listen on address: %s: %d", test->bind_address, test->server_port);
 		PRINT_ERR_FREE(log);
-		close(server->listener);
+		CLOSE(server->listener);
 		return -1;
 	}
 
@@ -537,7 +578,7 @@ int lagscope_server_select(struct lagscope_test_server *server)
 			}
 			/* handle data from an EXISTING client */
 			else {
-				bzero(buffer, msg_actual_size);
+				memset(buffer, 0, msg_actual_size);
 
 				/* got error or connection closed by client */
 				if ((nbytes = n_read(current_fd, buffer, msg_actual_size)) <= 0) {
@@ -551,7 +592,7 @@ int lagscope_server_select(struct lagscope_test_server *server)
 						err_code = ERROR_NETWORK_READ;
 						/* need to continue test and check other socket, so don't end the test */
 					}
-					close(current_fd);
+					CLOSE(current_fd);
 					FD_CLR(current_fd, &server->read_set); /* remove from master set when finished */
 				}
 				/* report ping request eceived */
@@ -571,7 +612,7 @@ int lagscope_server_select(struct lagscope_test_server *server)
 
 	free(buffer);
 	free(ip_address_str);
-	close(server->listener);
+	CLOSE(server->listener);
 	return err_code;
 }
 
@@ -598,7 +639,9 @@ long run_lagscope_receiver(struct lagscope_test_server *server)
 int main(int argc, char **argv)
 {
 	int err_code = NO_ERR;
+#ifndef _WIN32
 	cpu_set_t cpuset;
+#endif
 	struct lagscope_test *test;
 	struct lagscope_test_server *server;
 	struct lagscope_test_client *client;
@@ -637,19 +680,27 @@ int main(int argc, char **argv)
 	turn_off_light();
 
 	if (test->cpu_affinity != -1) {
+#ifndef _WIN32
 		CPU_ZERO(&cpuset);
 		CPU_SET(test->cpu_affinity, &cpuset);
 		PRINT_INFO("main: set cpu affinity");
 		if (pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset) != 0)
 			PRINT_ERR("main: cannot set cpu affinity");
+#else
+		test->cpu_affinity = -1;
+		PRINT_INFO("main: set cpu affinity: Lagscope currently do not support this option in Windows ");
+#endif
 	}
-
 	if (test->daemon) {
+#ifndef _WIN32
 		PRINT_INFO("main: run this tool in the background");
 		if (daemon(0, 0) != 0)
 			PRINT_ERR("main: cannot run this tool in the background");
+#else
+		test->daemon = 0;
+		PRINT_INFO("main: run in background: Lagscope currently do not support this option in Windows ");
+#endif
 	}
-
 	if (test->client_role == true) {
 		client = new_lagscope_client(test);
 		err_code = run_lagscope_sender(client);

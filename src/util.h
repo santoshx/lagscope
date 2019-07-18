@@ -12,6 +12,9 @@
 #include "common.h"
 #include "lagscope.h"
 
+#ifdef _WIN
+int asprintf(char **strp, const char *format, ...);
+#endif
 void print_flags(struct lagscope_test *test);
 void print_usage();
 void print_version();
@@ -32,9 +35,9 @@ void latencies_stats_cleanup(void);
 double unit_atod(const char *s);
 char *retrive_ip_address_str(struct sockaddr_storage *ss, char *ip_str, size_t maxlen);
 
-static inline double get_time_diff(struct timeval *t1, struct timeval *t2)
+static inline unsigned long get_time_diff(struct timeval *t1, struct timeval *t2)
 {
-	return fabs((t1->tv_sec + (t1->tv_usec / 1000000.0)) - (t2->tv_sec + (t2->tv_usec / 1000000.0)));
+	return abs((t1->tv_sec + (t1->tv_usec / 1000000)) - (t2->tv_sec + (t2->tv_usec / 1000000)));
 }
 
 static inline void report_progress(struct lagscope_test_runtime *test_runtime)

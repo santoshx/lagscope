@@ -13,5 +13,6 @@
 #include "util.h"
 #include "tcpstream.h"
 #include "controller.h"
+#include "logger.h"
 
 #endif // MAIN_H

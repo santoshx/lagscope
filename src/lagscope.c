@@ -102,7 +102,7 @@ struct lagscope_test_runtime *new_test_runtime(struct lagscope_test *test)
 		if (test->interval !=0)
 			total_pings = test->duration / test->interval;
 		else
-			total_pings = test->duration / 0.001;
+			total_pings = (unsigned long) (test->duration / 0.001);
 	}
 	/*
 	 * We report the percentage of test progress.
